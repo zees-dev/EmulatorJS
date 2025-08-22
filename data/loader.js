@@ -1,5 +1,6 @@
 (async function() {
     const scripts = [
+        "command-handler.js",
         "emulator.js",
         "nipplejs.js",
         "shaders.js",
@@ -125,6 +126,10 @@
     config.hideSettings = window.EJS_hideSettings;
     config.browserMode = window.EJS_browserMode;
     config.shaders = Object.assign({}, window.EJS_SHADERS, window.EJS_shaders ? window.EJS_shaders : {});
+    config.handlerConfig = window.EJS_handlerConfig;
+    config.commands = window.EJS_commands;
+    config.initCommands = window.EJS_initCommands;
+    config.onCommand = window.EJS_onCommand;
 
     let systemLang;
     try {

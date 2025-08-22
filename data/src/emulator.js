@@ -478,6 +478,10 @@ class EmulatorJS {
             this.startButtonClicked(button);
         }
         setTimeout(() => {
+            // Execute auto-start operations if configured
+            if (this.config.startOnLoad === true && this.config.initCommands && window.EJS_executeInitCommands) {
+                window.EJS_executeInitCommands(this.handler);
+            }
             this.callEvent("ready");
         }, 20);
     }
@@ -686,7 +690,7 @@ class EmulatorJS {
         return parts.join(".");
     }
     saveInBrowserSupported() {
-        return !!window.indexedDB && (typeof this.config.gameName === "string" || !this.config.gameUrl.startsWith("blob:"));
+        return !!window.indexedDB && (typeof this.config.gameName === "string" || (this.config.gameUrl && !this.config.gameUrl.startsWith("blob:")));
     }
     displayMessage(message, time) {
         if (!this.msgElem) {
@@ -1013,7 +1017,7 @@ class EmulatorJS {
             this.Module.callMain(args);
             if (typeof this.config.softLoad === "number" && this.config.softLoad > 0) {
                 this.resetTimeout = setTimeout(() => {
-                    this.gameManager.restart();
+                    this.handler.exec("control.restart");
                 }, this.config.softLoad * 1000);
             }
             this.Module.resumeMainLoop();
@@ -1517,7 +1521,8 @@ class EmulatorJS {
 
         const qSave = addButton("Quick Save", false, () => {
             const slot = this.getSettingValue("save-state-slot") ? this.getSettingValue("save-state-slot") : "1";
-            if (this.gameManager.quickSave(slot)) {
+            const result = this.handler.exec("state.quickSave", { slot });
+            if (result) {
                 this.displayMessage(this.localization("SAVED STATE TO SLOT") + " " + slot);
             } else {
                 this.displayMessage(this.localization("FAILED TO SAVE STATE"));
@@ -1526,7 +1531,7 @@ class EmulatorJS {
         });
         const qLoad = addButton("Quick Load", false, () => {
             const slot = this.getSettingValue("save-state-slot") ? this.getSettingValue("save-state-slot") : "1";
-            this.gameManager.quickLoad(slot);
+            this.handler.exec("state.quickLoad", { slot });
             this.displayMessage(this.localization("LOADED STATE FROM SLOT") + " " + slot);
             hideMenu();
         });
@@ -1873,12 +1878,12 @@ class EmulatorJS {
         
         const restartButton = addButton(this.config.buttonOpts.restart, () => {
             if (this.isNetplay && this.netplay.owner) {
-                this.gameManager.restart();
+                this.handler.exec("control.restart");
                 this.netplay.reset();
                 this.netplay.sendMessage({ restart: true });
                 this.play();
             } else if (!this.isNetplay) {
-                this.gameManager.restart();
+                this.handler.exec("control.restart");
             }
         });
         const pauseButton = addButton(this.config.buttonOpts.pause, () => {
@@ -1921,11 +1926,18 @@ class EmulatorJS {
                 }
             }
         }
-        this.play = (dontUpdate) => {
+        this._play = (dontUpdate) => {
             if (this.paused) this.togglePlaying(dontUpdate);
         }
-        this.pause = (dontUpdate) => {
+        this._pause = (dontUpdate) => {
             if (!this.paused) this.togglePlaying(dontUpdate);
+        }
+
+        this.play = (dontUpdate) => {
+            return this.handler.exec('control.play', { dontUpdate });
+        }
+        this.pause = (dontUpdate) => {
+            return this.handler.exec('control.pause', { dontUpdate });
         }
 
         let stateUrl;
@@ -2040,18 +2052,34 @@ class EmulatorJS {
 
         const volumeSettings = this.createElement("div");
         volumeSettings.classList.add("ejs_volume_parent");
-        const muteButton = addButton(this.config.buttonOpts.mute, () => {
+        this._mute = () => {
             muteButton.style.display = "none";
             unmuteButton.style.display = "";
             this.muted = true;
-            this.setVolume(0);
-        }, volumeSettings);
-        const unmuteButton = addButton(this.config.buttonOpts.unmute, () => {
+            this._setVolume(0);
+        }
+
+        this._unmute = () => {
             if (this.volume === 0) this.volume = 0.5;
             muteButton.style.display = "";
             unmuteButton.style.display = "none";
             this.muted = false;
-            this.setVolume(this.volume);
+            this._setVolume(this.volume);
+        }
+
+        this.mute = () => {
+            return this.handler.exec('control.mute');
+        }
+
+        this.unmute = () => {
+            return this.handler.exec('control.unmute');
+        }
+
+        const muteButton = addButton(this.config.buttonOpts.mute, () => {
+            this.mute();
+        }, volumeSettings);
+        const unmuteButton = addButton(this.config.buttonOpts.unmute, () => {
+            this.unmute();
         }, volumeSettings);
         unmuteButton.style.display = "none";
 
@@ -2067,7 +2095,7 @@ class EmulatorJS {
         volumeSlider.setAttribute("aria-valuemin", 0);
         volumeSlider.setAttribute("aria-valuemax", 100);
 
-        this.setVolume = (volume) => {
+        this._setVolume = (volume) => {
             this.saveSettings();
             this.muted = (volume === 0);
             volumeSlider.value = volume;
@@ -2083,6 +2111,10 @@ class EmulatorJS {
                 unmuteButton.style.display = (volume === 0) ? "" : "none";
                 muteButton.style.display = (volume === 0) ? "none" : "";
             }
+        }
+
+        this.setVolume = (volume) => {
+            return this.handler.exec("settings.change", { setting: 'volume', value: volume });
         }
 
         this.addEventListener(volumeSlider, "change mousemove touchmove mousedown touchstart mouseup", (e) => {
@@ -2170,15 +2202,7 @@ class EmulatorJS {
             }
         })
 
-        const enter = addButton(this.config.buttonOpts.enterFullscreen, () => {
-            this.toggleFullscreen(true);
-        });
-        const exit = addButton(this.config.buttonOpts.exitFullscreen, () => {
-            this.toggleFullscreen(false);
-        });
-        exit.style.display = "none";
-
-        this.toggleFullscreen = (fullscreen) => {
+        this._toggleFullscreen = (fullscreen) => {
             if (fullscreen) {
                 if (this.elements.parent.requestFullscreen) {
                     this.elements.parent.requestFullscreen();
@@ -2215,6 +2239,18 @@ class EmulatorJS {
                 }
             }
         }
+
+        this.toggleFullscreen = (fullscreen) => {
+            return this.handler.exec('control.fullscreen', { enabled: fullscreen });
+        }
+
+        const enter = addButton(this.config.buttonOpts.enterFullscreen, () => {
+            this.toggleFullscreen(true);
+        });
+        const exit = addButton(this.config.buttonOpts.exitFullscreen, () => {
+            this.toggleFullscreen(false);
+        });
+        exit.style.display = "none";
 
         let exitMenuIsOpen = false;
         const exitEmulation = addButton(this.config.buttonOpts.exitEmulation, async () => {
@@ -2439,19 +2475,13 @@ class EmulatorJS {
         this.controls = JSON.parse(JSON.stringify(this.defaultControllers));
         const body = this.createPopup("Control Settings", {
             "Reset": () => {
-                this.controls = JSON.parse(JSON.stringify(this.defaultControllers));
-                this.setupKeys();
-                this.checkGamepadInputs();
-                this.saveSettings();
+                this.handler.exec("menu.controlReset");
             },
             "Clear": () => {
-                this.controls = { 0: {}, 1: {}, 2: {}, 3: {} };
-                this.setupKeys();
-                this.checkGamepadInputs();
-                this.saveSettings();
+                this.handler.exec("menu.controlClear");
             },
             "Close": () => {
-                this.controlMenu.style.display = "none";
+                this.handler.exec("menu.controlClose");
             }
         }, true);
         this.setupKeys();
@@ -2949,7 +2979,7 @@ class EmulatorJS {
                 vgp.appendChild(label);
                 label.addEventListener("click", (e) => {
                     input.checked = !input.checked;
-                    this.changeSettingOption("virtual-gamepad", input.checked ? "enabled" : "disabled");
+                    this.handler.exec("settings.change", { setting: "virtual-gamepad", value: input.checked ? "enabled" : "disabled" });
                 })
                 this.on("start", (e) => {
                     if (this.getSettingValue("virtual-gamepad") === "disabled") {
@@ -3380,7 +3410,8 @@ class EmulatorJS {
         for (let i = 0; i < 4; i++) {
             for (let j = 0; j < 30; j++) {
                 if (this.controls[i][j] && this.controls[i][j].value === e.keyCode) {
-                    this.gameManager.simulateInput(i, j, (e.type === "keyup" ? 0 : (special.includes(j) ? 0x7fff : 1)));
+                    const state = e.type === "keyup" ? "released" : "pressed";
+                    this.handler.exec('input.simulate', { player: i, button: j, state });
                 }
             }
         }
@@ -3423,45 +3454,47 @@ class EmulatorJS {
                 const controlValue = this.controls[i][j].value2;
 
                 if (["buttonup", "buttondown"].includes(e.type) && (controlValue === e.label || controlValue === e.index)) {
-                    this.gameManager.simulateInput(i, j, (e.type === "buttonup" ? 0 : (special.includes(j) ? 0x7fff : 1)));
+                    const state = e.type === "buttonup" ? "released" : "pressed";
+                    this.handler.exec('input.simulate', { player: i, button: j, state });
                 } else if (e.type === "axischanged") {
                     if (typeof controlValue === "string" && controlValue.split(":")[0] === e.axis) {
                         if (special.includes(j)) {
                             if (j === 16 || j === 17) {
                                 if (e.value > 0) {
-                                    this.gameManager.simulateInput(i, 16, 0x7fff * e.value);
-                                    this.gameManager.simulateInput(i, 17, 0);
+                                    this.handler.exec('input.simulate', { player: i, button: 16, state: 'analog', value: 0x7fff * e.value });
+                                    this.handler.exec('input.simulate', { player: i, button: 17, state: 'analog', value: 0 });
                                 } else {
-                                    this.gameManager.simulateInput(i, 17, -0x7fff * e.value);
-                                    this.gameManager.simulateInput(i, 16, 0);
+                                    this.handler.exec('input.simulate', { player: i, button: 17, state: 'analog', value: -0x7fff * e.value });
+                                    this.handler.exec('input.simulate', { player: i, button: 16, state: 'analog', value: 0 });
                                 }
                             } else if (j === 18 || j === 19) {
                                 if (e.value > 0) {
-                                    this.gameManager.simulateInput(i, 18, 0x7fff * e.value);
-                                    this.gameManager.simulateInput(i, 19, 0);
+                                    this.handler.exec('input.simulate', { player: i, button: 18, state: 'analog', value: 0x7fff * e.value });
+                                    this.handler.exec('input.simulate', { player: i, button: 19, state: 'analog', value: 0 });
                                 } else {
-                                    this.gameManager.simulateInput(i, 19, -0x7fff * e.value);
-                                    this.gameManager.simulateInput(i, 18, 0);
+                                    this.handler.exec('input.simulate', { player: i, button: 19, state: 'analog', value: -0x7fff * e.value });
+                                    this.handler.exec('input.simulate', { player: i, button: 18, state: 'analog', value: 0 });
                                 }
                             } else if (j === 20 || j === 21) {
                                 if (e.value > 0) {
-                                    this.gameManager.simulateInput(i, 20, 0x7fff * e.value);
-                                    this.gameManager.simulateInput(i, 21, 0);
+                                    this.handler.exec('input.simulate', { player: i, button: 20, state: 'analog', value: 0x7fff * e.value });
+                                    this.handler.exec('input.simulate', { player: i, button: 21, state: 'analog', value: 0 });
                                 } else {
-                                    this.gameManager.simulateInput(i, 21, -0x7fff * e.value);
-                                    this.gameManager.simulateInput(i, 20, 0);
+                                    this.handler.exec('input.simulate', { player: i, button: 21, state: 'analog', value: -0x7fff * e.value });
+                                    this.handler.exec('input.simulate', { player: i, button: 20, state: 'analog', value: 0 });
                                 }
                             } else if (j === 22 || j === 23) {
                                 if (e.value > 0) {
-                                    this.gameManager.simulateInput(i, 22, 0x7fff * e.value);
-                                    this.gameManager.simulateInput(i, 23, 0);
+                                    this.handler.exec('input.simulate', { player: i, button: 22, state: 'analog', value: 0x7fff * e.value });
+                                    this.handler.exec('input.simulate', { player: i, button: 23, state: 'analog', value: 0 });
                                 } else {
-                                    this.gameManager.simulateInput(i, 23, -0x7fff * e.value);
-                                    this.gameManager.simulateInput(i, 22, 0);
+                                    this.handler.exec('input.simulate', { player: i, button: 23, state: 'analog', value: -0x7fff * e.value });
+                                    this.handler.exec('input.simulate', { player: i, button: 22, state: 'analog', value: 0 });
                                 }
                             }
                         } else if (value === 0 || controlValue === e.label || controlValue === `${e.axis}:${value}`) {
-                            this.gameManager.simulateInput(i, j, ((value === 0) ? 0 : 1));
+                            const state = value === 0 ? "released" : "pressed";
+                            this.handler.exec('input.simulate', { player: i, button: j, state: state });
                         }
                     }
                 }
@@ -3842,11 +3875,12 @@ class EmulatorJS {
                     if (e.type === "touchend" || e.type === "touchcancel") {
                         e.target.classList.remove("ejs_virtualGamepad_button_down");
                         window.setTimeout(() => {
-                            this.gameManager.simulateInput(0, value, 0);
+                            this.handler.exec('input.simulate', { player: 0, button: value, state: "released" });
                         })
                     } else {
                         e.target.classList.add("ejs_virtualGamepad_button_down");
-                        this.gameManager.simulateInput(0, value, downValue);
+                        const state = info[i].joystickInput === true ? "analog" : "pressed";
+                        this.handler.exec('input.simulate', { player: 0, button: value, state: state, value: downValue });
                     }
                 })
             }
@@ -3973,10 +4007,11 @@ class EmulatorJS {
                         if (left === 1) left = 0x7fff;
                         if (right === 1) right = 0x7fff;
                     }
-                    this.gameManager.simulateInput(0, dpad.inputValues[0], up);
-                    this.gameManager.simulateInput(0, dpad.inputValues[1], down);
-                    this.gameManager.simulateInput(0, dpad.inputValues[2], left);
-                    this.gameManager.simulateInput(0, dpad.inputValues[3], right);
+                    const state = dpad.joystickInput ? "analog" : (up || down || left || right ? "pressed" : "released");
+                    this.handler.exec('input.simulate', { player: 0, button: dpad.inputValues[0], state: state, value: up });
+                    this.handler.exec('input.simulate', { player: 0, button: dpad.inputValues[1], state: state, value: down });
+                    this.handler.exec('input.simulate', { player: 0, button: dpad.inputValues[2], state: state, value: left });
+                    this.handler.exec('input.simulate', { player: 0, button: dpad.inputValues[3], state: state, value: right });
                 }
             });
         })
@@ -4012,10 +4047,10 @@ class EmulatorJS {
                 "color": zone.color || "red"
             });
             zoneObj.on("end", () => {
-                this.gameManager.simulateInput(0, zone.inputValues[0], 0);
-                this.gameManager.simulateInput(0, zone.inputValues[1], 0);
-                this.gameManager.simulateInput(0, zone.inputValues[2], 0);
-                this.gameManager.simulateInput(0, zone.inputValues[3], 0);
+                this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[0], state: "released" });
+                this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[1], state: "released" });
+                this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[2], state: "released" });
+                this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[3], state: "released" });
             });
             zoneObj.on("move", (e, info) => {
                 const degree = info.angle.degree;
@@ -4055,47 +4090,47 @@ class EmulatorJS {
                         y = 0.022222222222222223 * (360 - degree) * distance / 50;
                     }
                     if (x > 0) {
-                        this.gameManager.simulateInput(0, zone.inputValues[0], 0x7fff * x);
-                        this.gameManager.simulateInput(0, zone.inputValues[1], 0);
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[0], state: "analog", value: 0x7fff * x });
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[1], state: "analog", value: 0 });
                     } else {
-                        this.gameManager.simulateInput(0, zone.inputValues[1], 0x7fff * -x);
-                        this.gameManager.simulateInput(0, zone.inputValues[0], 0);
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[1], state: "analog", value: 0x7fff * -x });
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[0], state: "analog", value: 0 });
                     }
                     if (y > 0) {
-                        this.gameManager.simulateInput(0, zone.inputValues[2], 0x7fff * y);
-                        this.gameManager.simulateInput(0, zone.inputValues[3], 0);
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[2], state: "analog", value: 0x7fff * y });
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[3], state: "analog", value: 0 });
                     } else {
-                        this.gameManager.simulateInput(0, zone.inputValues[3], 0x7fff * -y);
-                        this.gameManager.simulateInput(0, zone.inputValues[2], 0);
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[3], state: "analog", value: 0x7fff * -y });
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[2], state: "analog", value: 0 });
                     }
 
                 } else {
                     if (degree >= 30 && degree < 150) {
-                        this.gameManager.simulateInput(0, zone.inputValues[0], 1);
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[0], state: "pressed" });
                     } else {
                         window.setTimeout(() => {
-                            this.gameManager.simulateInput(0, zone.inputValues[0], 0);
+                            this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[0], state: "released" });
                         }, 30);
                     }
                     if (degree >= 210 && degree < 330) {
-                        this.gameManager.simulateInput(0, zone.inputValues[1], 1);
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[1], state: "pressed" });
                     } else {
                         window.setTimeout(() => {
-                            this.gameManager.simulateInput(0, zone.inputValues[1], 0);
+                            this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[1], state: "released" });
                         }, 30);
                     }
                     if (degree >= 120 && degree < 240) {
-                        this.gameManager.simulateInput(0, zone.inputValues[2], 1);
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[2], state: "pressed" });
                     } else {
                         window.setTimeout(() => {
-                            this.gameManager.simulateInput(0, zone.inputValues[2], 0);
+                            this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[2], state: "released" });
                         }, 30);
                     }
                     if (degree >= 300 || degree >= 0 && degree < 60) {
-                        this.gameManager.simulateInput(0, zone.inputValues[3], 1);
+                        this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[3], state: "pressed" });
                     } else {
                         window.setTimeout(() => {
-                            this.gameManager.simulateInput(0, zone.inputValues[3], 0);
+                            this.handler.exec('input.simulate', { player: 0, button: zone.inputValues[3], state: "released" });
                         }, 30);
                     }
                 }
@@ -4111,7 +4146,7 @@ class EmulatorJS {
                 menuButton.style.display = "";
                 if (matchMedia('(pointer:fine)').matches && this.getSettingValue("menu-bar-button") !== "visible") {
                     menuButton.style.opacity = 0;
-                    this.changeSettingOption('menu-bar-button', 'hidden', true);
+                    this.handler.exec("settings.change", { setting: 'menu-bar-button', value: 'hidden', startup: true });
                 }
             });
             this.elements.parent.appendChild(menuButton);
@@ -4255,7 +4290,7 @@ class EmulatorJS {
                 this.controls = coreSpecific.controlSettings;
                 this.checkGamepadInputs();
                 for (const k in coreSpecific.settings) {
-                    this.changeSettingOption(k, coreSpecific.settings[k]);
+                    this.handler.exec("settings.change", { setting: k, value: coreSpecific.settings[k] });
                 }
                 for (let i = 0; i < coreSpecific.cheats.length; i++) {
                     const cheat = coreSpecific.cheats[i];
@@ -4693,13 +4728,17 @@ class EmulatorJS {
 
         let funcs = [];
         let settings = {};
-        this.changeSettingOption = (title, newValue, startup) => {
+        this._changeSettingOption = (title, newValue, startup) => {
             this.allSettings[title] = newValue;
             if (startup !== true) {
                 this.settings[title] = newValue;
             }
             settings[title] = newValue;
             funcs.forEach(e => e(title));
+        }
+
+        this.changeSettingOption = (title, newValue, startup) => {
+            return this.handler.exec("settings.change", { setting: title, value: newValue, startup: startup });
         }
         let allOpts = {};
 
@@ -4788,7 +4827,7 @@ class EmulatorJS {
                 optionButton.classList.add("ejs_button_style");
 
                 this.addEventListener(optionButton, "click", (e) => {
-                    this.changeSettingOption(id, opt);
+                    this.handler.exec("settings.change", { setting: id, value: opt });
                     for (let j = 0; j < buttons.length; j++) {
                         buttons[j].classList.remove("ejs_option_row_selected");
                     }
@@ -5143,7 +5182,7 @@ class EmulatorJS {
 
         if (this.config.defaultOptions) {
             for (const k in this.config.defaultOptions) {
-                this.changeSettingOption(k, this.config.defaultOptions[k], true);
+                this.handler.exec("settings.change", { setting: k, value: this.config.defaultOptions[k], startup: true });
             }
         }
 
@@ -5704,7 +5743,7 @@ class EmulatorJS {
                 });
             }
             if (data.restart) {
-                this.gameManager.restart();
+                this.handler.exec("control.restart");
                 this.netplay.reset();
                 this.play(true);
             }
