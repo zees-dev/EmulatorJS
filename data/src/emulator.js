@@ -478,9 +478,17 @@ class EmulatorJS {
             this.startButtonClicked(button);
         }
         setTimeout(() => {
-            // Execute auto-start operations if configured
-            if (this.config.startOnLoad === true && this.config.initCommands && window.EJS_executeInitCommands) {
-                window.EJS_executeInitCommands(this.handler);
+            // Execute init commands if configured
+            if (this.config.startOnLoad === true && this.config.initCommands && Array.isArray(this.config.initCommands)) {
+                this.config.initCommands.forEach(op => {
+                    if (op && op.method) {
+                        try {
+                            this.handler.exec(op.method, op.params || {});
+                        } catch (error) {
+                            console.error('EJS_CommandHandler: init command failed:', error);
+                        }
+                    }
+                });
             }
             this.callEvent("ready");
         }, 20);
