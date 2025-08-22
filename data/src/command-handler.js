@@ -148,6 +148,42 @@ class EJS_CommandHandler {
             },
 
             /**
+             * Handle keyboard input change events
+             * @param {Object} op.params - Parameters
+             * @param {number} op.params.player - Player index (0-3)
+             * @param {number} op.params.button - Button number (0-29)
+             * @param {number} op.params.keyCode - Keyboard key code
+             */
+            'input.keyChange': (op) => {
+                const { player, button, keyCode } = op.params;
+                if (!this.emulator.controls[player][button]) {
+                    this.emulator.controls[player][button] = {};
+                }
+                this.emulator.controls[player][button].value = keyCode;
+                this.emulator.controlPopup.parentElement.parentElement.setAttribute("hidden", "");
+                this.emulator.checkGamepadInputs();
+                this.emulator.saveSettings();
+            },
+
+            /**
+             * Set gamepad control mapping
+             * @param {Object} op.params - Parameters
+             * @param {number} op.params.player - Player index (0-3)
+             * @param {number} op.params.button - Button number (0-29)
+             * @param {string} op.params.label - Gamepad button label
+             */
+            'input.gamepadChange': (op) => {
+                const { player, button, label } = op.params;
+                if (!this.emulator.controls[player][button]) {
+                    this.emulator.controls[player][button] = {};
+                }
+                this.emulator.controls[player][button].value2 = label;
+                this.emulator.controlPopup.parentElement.parentElement.setAttribute("hidden", "");
+                this.emulator.checkGamepadInputs();
+                this.emulator.saveSettings();
+            },
+
+            /**
              * Pause emulation
              * @param {Object} op.params - Parameters
              * @param {boolean} [op.params.dontUpdate] - Skip UI update
@@ -352,46 +388,6 @@ class EJS_CommandHandler {
                     this.emulator.controlMenu.style.display = "none";
                 }
             },
-
-            /**
-             * Set keyboard control mapping
-             * @param {Object} op.params - Parameters
-             * @param {number} op.params.player - Player index (0-3)
-             * @param {string} op.params.button - Button name
-             * @param {number} op.params.keyCode - Keyboard key code
-             */
-            'menu.controlSetKeyboard': (op) => {
-                const { player, button, keyCode } = op.params;
-                if (!this.emulator.controls[player][button]) {
-                    this.emulator.controls[player][button] = {};
-                }
-                this.emulator.controls[player][button].value = keyCode;
-                if (this.emulator.controlPopup) {
-                    this.emulator.controlPopup.parentElement.parentElement.setAttribute("hidden", "");
-                }
-                this.emulator.checkGamepadInputs();
-                this.emulator.saveSettings();
-            },
-
-            /**
-             * Set gamepad control mapping
-             * @param {Object} op.params - Parameters
-             * @param {number} op.params.player - Player index (0-3)
-             * @param {string} op.params.button - Button name
-             * @param {string} op.params.label - Gamepad button label
-             */
-            'menu.controlSetGamepad': (op) => {
-                const { player, button, label } = op.params;
-                if (!this.emulator.controls[player][button]) {
-                    this.emulator.controls[player][button] = {};
-                }
-                this.emulator.controls[player][button].value2 = label;
-                if (this.emulator.controlPopup) {
-                    this.emulator.controlPopup.parentElement.parentElement.setAttribute("hidden", "");
-                }
-                this.emulator.checkGamepadInputs();
-                this.emulator.saveSettings();
-            }
         };
     }
 

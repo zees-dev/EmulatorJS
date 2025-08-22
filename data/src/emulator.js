@@ -3406,10 +3406,11 @@ class EmulatorJS {
             if (!this.controls[player][num]) {
                 this.controls[player][num] = {};
             }
-            this.controls[player][num].value = e.keyCode;
-            this.controlPopup.parentElement.parentElement.setAttribute("hidden", "");
-            this.checkGamepadInputs();
-            this.saveSettings();
+            this.handler.exec('input.keyChange', {
+                player: parseInt(player),
+                button: parseInt(num),
+                keyCode: e.keyCode
+            });
             return;
         }
         if (this.settingsMenu.style.display !== "none" || this.isPopupOpen() || this.getSettingValue("keyboardInput") === "enabled") return;
@@ -3442,13 +3443,11 @@ class EmulatorJS {
             const num = this.controlPopup.getAttribute("button-num");
             const player = parseInt(this.controlPopup.getAttribute("player-num"));
             if (gamepadIndex !== player) return;
-            if (!this.controls[player][num]) {
-                this.controls[player][num] = {};
-            }
-            this.controls[player][num].value2 = e.label;
-            this.controlPopup.parentElement.parentElement.setAttribute("hidden", "");
-            this.checkGamepadInputs();
-            this.saveSettings();
+            this.handler.exec("input.gamepadChange", {
+                player: player,
+                button: parseInt(num),
+                label: e.label
+            });
             return;
         }
         if (this.settingsMenu.style.display !== "none" || this.isPopupOpen()) return;
