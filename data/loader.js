@@ -1,5 +1,6 @@
 (async function() {
     const scripts = [
+        "command-handler.js",
         "virtualGamepadEditor.js",
         "emulator.js",
         "nipplejs.js",
@@ -130,6 +131,10 @@
     config.fixedSaveInterval = window.EJS_fixedSaveInterval;
     config.disableAutoUnload = window.EJS_disableAutoUnload;
     config.disableBatchBootup = window.EJS_disableBatchBootup;
+    config.handlerConfig = window.EJS_handlerConfig;
+    config.commands = window.EJS_commands;
+    config.initCommands = window.EJS_initCommands;
+    config.onCommand = window.EJS_onCommand;
 
     let systemLang;
     try {
