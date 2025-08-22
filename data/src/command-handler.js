@@ -6,9 +6,8 @@
 
 /**
  * Handles emulator operations through a unified interface
- * Supports custom command overrides via window.EJS_commands
+ * Supports custom command overrides
  * Supports operation callbacks via window.EJS_onCommand
- * Supports init operations via window.EJS_initCommands
  * @class
  */
 class EJS_CommandHandler {
@@ -18,15 +17,12 @@ class EJS_CommandHandler {
      */
     constructor(emulator, config = {}) {
         this.emulator = emulator;
-        this.config = this.validateConfig(config.handlerConfig || {});
-        this.commands = this.buildCommandOptions(config.commands || window.EJS_commands);
+        this.commands = this.buildCommandOptions(config.commands);
 
         // Setup command callback if EJS_onCommand is defined
         this.notifyCommandCB = null;
         if (typeof config.onCommand === 'function') {
             this.notifyCommandCB = config.onCommand;
-        } else if (typeof window.EJS_onCommand === 'function') {
-            this.notifyCommandCB = window.EJS_onCommand;
         } else {
             console.warn('EJS_CommandHandler: EJS_onCommand must be a function');
         }
@@ -51,45 +47,17 @@ class EJS_CommandHandler {
                 if (typeof userCommand === 'function') {
                     // Override the default command with user's implementation
                     mergedCommands[method] = userCommand;
-                    if (this.config?.enableLogging) {
-                        console.log(`EJS_CommandHandler: Overriding operation "${method}" with custom implementation`);
-                    }
+                    console.log(`EJS_CommandHandler: Overriding operation "${method}" with custom implementation`);
                 } else if (userCommand === false || userCommand === null) {
                     // Allow disabling operations by setting to false or null
                     delete mergedCommands[method];
-                    if (this.config?.enableLogging) {
-                        console.log(`EJS_CommandHandler: Disabling operation "${method}"`);
-                    }
+                    console.log(`EJS_CommandHandler: Disabling operation "${method}"`);
                 } else {
                     console.warn(`EJS_CommandHandler: Invalid command override for "${method}" - must be a function, false, or null`);
                 }
             }
         }
         return mergedCommands;
-    }
-
-    /**
-     * Validates and sets up configuration with defaults
-     * @param {Object} config - User configuration
-     * @returns {Object} Validated configuration
-     * @private
-     */
-    validateConfig(config) {
-        const defaults = {
-            fallbackOnError: true,      // Fallback to default on error  
-            enableLogging: false,       // Operation logging control
-            strictMode: false           // Throw errors instead of fallback
-        };
-        const validatedConfig = { ...defaults, ...config };
-        Object.keys(defaults).forEach(key => {
-            if (typeof validatedConfig[key] !== 'boolean') {
-                if (config.enableLogging) {
-                    console.warn(`EJS_CommandHandler: Invalid config value for ${key}, using default:`, defaults[key]);
-                }
-                validatedConfig[key] = defaults[key];
-            }
-        });
-        return validatedConfig;
     }
 
     /**
@@ -104,18 +72,9 @@ class EJS_CommandHandler {
      * handler.exec('state.quickSave', { slot: 1 });
      */
     exec(method, params = {}) {
-        if (this.config.enableLogging) {
-            console.log('EJS_CommandHandler: Executing operation:', method, params);
-        }
-
-        // Validate method exists
         if (!this.commands[method]) {
             const errorMsg = `Unknown operation method: ${method}`;
-            if (this.config.strictMode || !this.config.fallbackOnError) {
-                throw new Error(errorMsg);
-            }
-            console.warn('EJS_CommandHandler:', errorMsg, '- operation ignored');
-            return null;
+            throw new Error(errorMsg);
         }
 
         const operation = {
@@ -131,10 +90,7 @@ class EJS_CommandHandler {
         } catch (error) {
             const errorMsg = `Error executing operation ${method}: ${error.message}`;
             this.notifyCommand(method, params, null, error);
-            if (this.config.strictMode || !this.config.fallbackOnError) {
-                throw new Error(errorMsg);
-            }
-            console.error('EJS_CommandHandler:', errorMsg);
+            throw new Error(errorMsg);
         }
 
         return result;
@@ -462,26 +418,4 @@ class EJS_CommandHandler {
     }
 }
 
-/**
- * Execute auto-start operations if configured
- * @param {EJS_CommandHandler} handler - Handler instance
- * @private
- */
-function EJS_executeInitCommands(handler) {
-    const autoStartOps = window.EJS_initCommands;
-    if (!autoStartOps || !Array.isArray(autoStartOps)) {
-        return;
-    }
-    autoStartOps.forEach(op => {
-        if (op && op.method) {
-            try {
-                handler.exec(op.method, op.params || {});
-            } catch (error) {
-                console.error('EJS_CommandHandler: Auto-start operation failed:', error);
-            }
-        }
-    });
-}
-
 window.EJS_CommandHandler = EJS_CommandHandler;
-window.EJS_executeInitCommands = EJS_executeInitCommands;
