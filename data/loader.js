@@ -135,6 +135,7 @@
     config.commands = window.EJS_commands;
     config.initCommands = window.EJS_initCommands;
     config.onCommand = window.EJS_onCommand;
+    config.controlsOnly = window.EJS_controlsOnly;
 
     let systemLang;
     try {

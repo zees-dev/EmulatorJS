@@ -213,6 +213,11 @@ class EmulatorJS {
         }
         this.netplayEnabled = true;
         this.config = config;
+        // Initialize command handler
+        this.handler = new window.EJS_CommandHandler(this, {
+            commands: config.commands,
+            onCommand: config.onCommand
+        });
         this.config.buttonOpts = this.buildButtonOptions(this.config.buttonOpts);
         this.config.settingsLanguage = window.EJS_settingsLanguage || false;
         switch (this.config.browserMode) {
@@ -230,6 +235,12 @@ class EmulatorJS {
                 break;
             default: // Auto detect
                 config.browserMode = undefined;
+        }
+        // Controls-only mode forces mobile mode for on-screen controls
+        this.controlsOnly = this.config.controlsOnly === true;
+        if (this.controlsOnly) {
+            if (this.debug) { console.log("Controls-only mode is enabled, forcing mobile mode"); }
+            this.config.browserMode = 1;
         }
         this.currentPopup = null;
         this.isFastForward = false;
@@ -373,7 +384,11 @@ class EmulatorJS {
             }
         }
 
-        this.createStartButton();
+        if (this.controlsOnly) {
+            this.initControlsOnlyMode();
+        } else {
+            this.createStartButton();
+        }
         this.handleResize();
 
         if (this.config.fixedSaveInterval) {
@@ -393,6 +408,39 @@ class EmulatorJS {
         this.saveSaveInterval = setInterval(() => {
             if (this.started) this.gameManager.saveSaveFiles();
         }, period);
+    }
+
+    initControlsOnlyMode() {
+        // Controls-only mode: show virtual gamepad and menu without loading a game
+        // This is useful for remote play scenarios where controls are on one device
+        // and the game is rendered on another
+
+        // Set up the settings menu (normally done in startGame)
+        this.setupSettingsMenu();
+        this.loadSettings();
+
+        // Apply virtual gamepad layout after settings are loaded
+        if (this.virtualGamepadLayout && this.virtualGamepadDefaults) {
+            this.measureVirtualGamepadDefaults();
+            this.applyVirtualGamepadLayout();
+        }
+
+        // Mark as started so UI components work correctly
+        this.started = true;
+        this.paused = false; // For remote play, assume game is running on remote screen
+
+        // Show the virtual gamepad (normally triggered by touch detection)
+        if (this.virtualGamepad) {
+            this.virtualGamepad.style.display = "";
+        }
+
+        // Show the menu bar (set opacity since it's hidden by default until "start" event)
+        this.elements.menu.style.opacity = "";
+        this.menu.open(true);
+
+        // Fire the ready and start events for any callbacks
+        this.callEvent("ready");
+        this.callEvent("start");
     }
 
     setColor(color) {
@@ -1982,7 +2030,10 @@ class EmulatorJS {
                     playButton.style.display = "none";
                 }
             }
-            this.gameManager.toggleMainLoop(this.paused ? 0 : 1);
+            // Skip gameManager call in controls-only mode (no local game running)
+            if (!this.controlsOnly && this.gameManager) {
+                this.gameManager.toggleMainLoop(this.paused ? 0 : 1);
+            }
 
             //I now realize its not easy to pause it while the cursor is locked, just in case I guess
             if (this.enableMouseLock) {
@@ -2169,7 +2220,8 @@ class EmulatorJS {
             volumeSlider.setAttribute("aria-valuenow", volume * 100);
             volumeSlider.setAttribute("aria-valuetext", (volume * 100).toFixed(1) + "%");
             volumeSlider.setAttribute("style", "--value: " + volume * 100 + "%;margin-left: 5px;position: relative;z-index: 2;");
-            if (this.Module.AL && this.Module.AL.currentCtx && this.Module.AL.currentCtx.sources) {
+            // Skip audio context manipulation in controls-only mode (no local audio)
+            if (!this.controlsOnly && this.Module && this.Module.AL && this.Module.AL.currentCtx && this.Module.AL.currentCtx.sources) {
                 this.Module.AL.currentCtx.sources.forEach(e => {
                     e.gain.gain.value = volume;
                 })
@@ -4626,7 +4678,10 @@ class EmulatorJS {
                 if (typeof ejs_settings.volume !== "number" || typeof ejs_settings.muted !== "boolean") return;
                 this.volume = ejs_settings.volume;
                 this.muted = ejs_settings.muted;
-                this.setVolume(this.muted ? 0 : this.volume);
+                // Skip setVolume in controls-only mode (no local audio)
+                if (!this.controlsOnly) {
+                    this.setVolume(this.muted ? 0 : this.volume);
+                }
             } catch(e) {
                 console.warn("Could not load previous settings", e);
             }
