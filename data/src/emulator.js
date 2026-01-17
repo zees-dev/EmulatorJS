@@ -3623,11 +3623,11 @@ class EmulatorJS {
             return;
         }
         let pressed = true;
-        this.gameManager.simulateInput(playerIndex, buttonIndex, inputValue);
+        this.handler.exec('input.simulate', { player: playerIndex, button: buttonIndex, state: 'pressed' });
         const interval = this.getAutofireInterval(playerIndex, buttonIndex);
         this.autofireIntervals[key] = setInterval(() => {
             pressed = !pressed;
-            this.gameManager.simulateInput(playerIndex, buttonIndex, pressed ? inputValue : 0);
+            this.handler.exec('input.simulate', { player: playerIndex, button: buttonIndex, state: pressed ? 'pressed' : 'released' });
         }, interval);
     }
     stopAutofire(playerIndex, buttonIndex) {
@@ -3635,16 +3635,14 @@ class EmulatorJS {
         if (this.autofireIntervals[key]) {
             clearInterval(this.autofireIntervals[key]);
             delete this.autofireIntervals[key];
-            this.gameManager.simulateInput(playerIndex, buttonIndex, 0);
+            this.handler.exec('input.simulate', { player: playerIndex, button: buttonIndex, state: 'released' });
         }
     }
     stopAllAutofire() {
         for (const key in this.autofireIntervals) {
             clearInterval(this.autofireIntervals[key]);
             const [playerIndex, buttonIndex] = key.split("-").map(Number);
-            if (this.gameManager) {
-                this.gameManager.simulateInput(playerIndex, buttonIndex, 0);
-            }
+            this.handler.exec('input.simulate', { player: playerIndex, button: buttonIndex, state: 'released' });
         }
         this.autofireIntervals = {};
     }
