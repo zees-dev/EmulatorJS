@@ -136,6 +136,7 @@
     config.initCommands = window.EJS_initCommands;
     config.onCommand = window.EJS_onCommand;
     config.controlsOnly = window.EJS_controlsOnly;
+    config.defaultAutoFireInterval = window.EJS_defaultAutoFireInterval;
 
     let systemLang;
     try {

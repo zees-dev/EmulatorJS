@@ -251,7 +251,23 @@ class EmulatorJS {
         this.cheats = [];
         this.started = false;
         this.volume = (typeof this.config.volume === "number") ? this.config.volume : 0.5;
-        if (this.config.defaultControllers) this.defaultControllers = this.config.defaultControllers;
+        if (this.config.defaultControllers) {
+            // Merge user config with defaults instead of replacing
+            for (const player in this.config.defaultControllers) {
+                if (!this.defaultControllers[player]) {
+                    this.defaultControllers[player] = {};
+                }
+                for (const button in this.config.defaultControllers[player]) {
+                    this.defaultControllers[player][button] = Object.assign(
+                        {},
+                        this.defaultControllers[player][button] || {},
+                        this.config.defaultControllers[player][button]
+                    );
+                }
+            }
+        }
+        this.defaultAutoFireInterval = this.config.defaultAutoFireInterval || 100;
+        this.autofireIntervals = {};
         this.muted = false;
         this.paused = true;
         this.missingLang = [];
@@ -1214,7 +1230,7 @@ class EmulatorJS {
             if (document.activeElement !== this.elements.parent && this.config.noAutoFocus !== true) this.elements.parent.focus();
         })
         this.addEventListener(window, "resize", this.handleResize.bind(this));
-        //this.addEventListener(window, "blur", e => console.log(e), true); //TODO - add "click to make keyboard keys work" message?
+        this.addEventListener(window, "blur", () => this.stopAllAutofire());
 
         let counter = 0;
         this.elements.statePopupPanel = this.createPopup("", {}, true);
@@ -2034,6 +2050,9 @@ class EmulatorJS {
             if (!this.controlsOnly && this.gameManager) {
                 this.gameManager.toggleMainLoop(this.paused ? 0 : 1);
             }
+            if (this.paused) {
+                this.stopAllAutofire();
+            }
 
             //I now realize its not easy to pause it while the cursor is locked, just in case I guess
             if (this.enableMouseLock) {
@@ -2594,9 +2613,11 @@ class EmulatorJS {
         this.controls = JSON.parse(JSON.stringify(this.defaultControllers));
         const body = this.createPopup("Control Settings", {
             "Reset": () => {
+                this.stopAllAutofire();
                 this.handler.exec("menu.controlReset");
             },
             "Clear": () => {
+                this.stopAllAutofire();
                 this.handler.exec("menu.controlClear");
             },
             "Close": () => {
@@ -3089,7 +3110,7 @@ class EmulatorJS {
             leftPadding.innerHTML = "&nbsp;";
 
             const aboutParent = this.createElement("div");
-            aboutParent.style = "font-size:12px;width:50%;float:left;";
+            aboutParent.style = "font-size:12px;width:40%;float:left;";
             const gamepad = this.createElement("div");
             gamepad.style = "text-align:center;width:50%;float:left;";
             gamepad.innerText = this.localization("Gamepad");
@@ -3099,12 +3120,22 @@ class EmulatorJS {
             keyboard.innerText = this.localization("Keyboard");
             aboutParent.appendChild(keyboard);
 
+            const setHeader = this.createElement("div");
+            setHeader.style = "font-size:12px;width:15%;float:left;text-align:center;";
+            setHeader.innerHTML = "&nbsp;";
+
+            const autofireHeader = this.createElement("div");
+            autofireHeader.style = "font-size:12px;width:20%;float:left;text-align:center;";
+            autofireHeader.innerText = this.localization("Autofire");
+
             const headingPadding = this.createElement("div");
             headingPadding.style = "clear:both;";
 
             playerTitle.appendChild(gamepadTitle);
             playerTitle.appendChild(leftPadding);
             playerTitle.appendChild(aboutParent);
+            playerTitle.appendChild(setHeader);
+            playerTitle.appendChild(autofireHeader);
 
             if ((this.touch || this.hasTouchScreen) && i === 0) {
                 const vgp = this.createElement("div");
@@ -3155,7 +3186,7 @@ class EmulatorJS {
                 title.appendChild(label);
 
                 const textBoxes = this.createElement("div");
-                textBoxes.style = "width:50%;float:left;";
+                textBoxes.style = "width:40%;float:left;";
 
                 const textBox1Parent = this.createElement("div");
                 textBox1Parent.style = "width:50%;float:left;padding: 0 5px;";
@@ -3223,11 +3254,46 @@ class EmulatorJS {
                 textBoxes.appendChild(padding);
 
                 const setButton = this.createElement("div");
-                setButton.style = "width:25%;float:left;";
+                setButton.style = "width:15%;float:left;";
                 const button = this.createElement("a");
                 button.classList.add("ejs_control_set_button");
                 button.innerText = this.localization("Set");
                 setButton.appendChild(button);
+
+                // Autofire checkbox - not available for analog stick axes
+                const autofireColumn = this.createElement("div");
+                autofireColumn.style = "width:20%;float:left;text-align:center;";
+
+                if (!this.analogAxes.includes(k)) {
+                    const autofireCheckbox = this.createElement("input");
+                    autofireCheckbox.type = "checkbox";
+                    autofireCheckbox.style = "cursor:pointer;";
+                    autofireCheckbox.checked = this.controls[i][k] && this.controls[i][k].autofire === true;
+                    autofireCheckbox.setAttribute("data-player", i);
+                    autofireCheckbox.setAttribute("data-button", k);
+
+                    // Update checkbox state when controls change
+                    buttonListeners.push(() => {
+                        autofireCheckbox.checked = this.controls[i][k] && this.controls[i][k].autofire === true;
+                    });
+
+                    this.addEventListener(autofireCheckbox, "change", (e) => {
+                        e.stopPropagation();
+                        const playerIdx = parseInt(e.target.getAttribute("data-player"));
+                        const buttonIdx = parseInt(e.target.getAttribute("data-button"));
+                        if (!this.controls[playerIdx][buttonIdx]) {
+                            this.controls[playerIdx][buttonIdx] = {};
+                        }
+                        this.controls[playerIdx][buttonIdx].autofire = e.target.checked;
+                        // Stop any active autofire if unchecked
+                        if (!e.target.checked) {
+                            this.stopAutofire(playerIdx, buttonIdx);
+                        }
+                        this.saveSettings();
+                    });
+
+                    autofireColumn.appendChild(autofireCheckbox);
+                }
 
                 const padding2 = this.createElement("div");
                 padding2.style = "clear:both;";
@@ -3235,11 +3301,16 @@ class EmulatorJS {
                 buttonText.appendChild(title);
                 buttonText.appendChild(textBoxes);
                 buttonText.appendChild(setButton);
+                buttonText.appendChild(autofireColumn);
                 buttonText.appendChild(padding2);
 
                 player.appendChild(buttonText);
 
                 this.addEventListener(buttonText, "mousedown", (e) => {
+                    // Don't open popup when clicking on the autofire checkbox
+                    if (e.target.tagName === "INPUT" && e.target.type === "checkbox") {
+                        return;
+                    }
                     e.preventDefault();
                     this.controlPopup.parentElement.parentElement.removeAttribute("hidden");
                     this.controlPopup.innerText = "[ " + controlLabel + " ]\n" + this.localization("Press Keyboard");
@@ -3406,6 +3477,8 @@ class EmulatorJS {
             2: {},
             3: {}
         }
+        // Analog stick axes - these use 0x7fff values and don't support autofire
+        this.analogAxes = [16, 17, 18, 19, 20, 21, 22, 23];
         this.keyMap = {
             0: "",
             8: "backspace",
@@ -3533,6 +3606,48 @@ class EmulatorJS {
         }
         return -1;
     }
+    getAutofireInterval(playerIndex, buttonIndex) {
+        const control = this.controls[playerIndex] && this.controls[playerIndex][buttonIndex];
+        if (control && typeof control.autoFireInterval === "number") {
+            return control.autoFireInterval;
+        }
+        return this.defaultAutoFireInterval;
+    }
+    isAutofireEnabled(playerIndex, buttonIndex) {
+        const control = this.controls[playerIndex] && this.controls[playerIndex][buttonIndex];
+        return control && control.autofire === true;
+    }
+    startAutofire(playerIndex, buttonIndex, inputValue) {
+        const key = `${playerIndex}-${buttonIndex}`;
+        if (this.autofireIntervals[key]) {
+            return;
+        }
+        let pressed = true;
+        this.gameManager.simulateInput(playerIndex, buttonIndex, inputValue);
+        const interval = this.getAutofireInterval(playerIndex, buttonIndex);
+        this.autofireIntervals[key] = setInterval(() => {
+            pressed = !pressed;
+            this.gameManager.simulateInput(playerIndex, buttonIndex, pressed ? inputValue : 0);
+        }, interval);
+    }
+    stopAutofire(playerIndex, buttonIndex) {
+        const key = `${playerIndex}-${buttonIndex}`;
+        if (this.autofireIntervals[key]) {
+            clearInterval(this.autofireIntervals[key]);
+            delete this.autofireIntervals[key];
+            this.gameManager.simulateInput(playerIndex, buttonIndex, 0);
+        }
+    }
+    stopAllAutofire() {
+        for (const key in this.autofireIntervals) {
+            clearInterval(this.autofireIntervals[key]);
+            const [playerIndex, buttonIndex] = key.split("-").map(Number);
+            if (this.gameManager) {
+                this.gameManager.simulateInput(playerIndex, buttonIndex, 0);
+            }
+        }
+        this.autofireIntervals = {};
+    }
     keyChange(e) {
         if (e.repeat) return;
         if (!this.started) return;
@@ -3551,12 +3666,24 @@ class EmulatorJS {
         }
         if (this.settingsMenu.style.display !== "none" || this.isPopupOpen() || this.getSettingValue("keyboardInput") === "enabled") return;
         e.preventDefault();
-        const special = [16, 17, 18, 19, 20, 21, 22, 23];
         for (let i = 0; i < 4; i++) {
             for (let j = 0; j < 30; j++) {
                 if (this.controls[i][j] && this.controls[i][j].value === e.keyCode) {
-                    const state = e.type === "keyup" ? "released" : "pressed";
-                    this.handler.exec('input.simulate', { player: i, button: j, state });
+                    const isAnalog = this.analogAxes.includes(j);
+                    const inputValue = isAnalog ? 0x7fff : 1;
+                    if (e.type === "keyup") {
+                        if (this.isAutofireEnabled(i, j) && !isAnalog) {
+                            this.stopAutofire(i, j);
+                        } else {
+                            this.handler.exec('input.simulate', { player: i, button: j, state: 'released' });
+                        }
+                    } else {
+                        if (this.isAutofireEnabled(i, j) && !isAnalog) {
+                            this.startAutofire(i, j, inputValue);
+                        } else {
+                            this.handler.exec('input.simulate', { player: i, button: j, state: 'pressed' });
+                        }
+                    }
                 }
             }
         }
@@ -3587,7 +3714,6 @@ class EmulatorJS {
             return;
         }
         if (this.settingsMenu.style.display !== "none" || this.isPopupOpen()) return;
-        const special = [16, 17, 18, 19, 20, 21, 22, 23];
         for (let i = 0; i < 4; i++) {
             if (gamepadIndex !== i) continue;
             for (let j = 0; j < 30; j++) {
@@ -3595,13 +3721,26 @@ class EmulatorJS {
                     continue;
                 }
                 const controlValue = this.controls[i][j].value2;
+                const isAnalog = this.analogAxes.includes(j);
 
                 if (["buttonup", "buttondown"].includes(e.type) && (controlValue === e.label || controlValue === e.index)) {
-                    const state = e.type === "buttonup" ? "released" : "pressed";
-                    this.handler.exec('input.simulate', { player: i, button: j, state });
+                    const inputValue = isAnalog ? 0x7fff : 1;
+                    if (e.type === "buttonup") {
+                        if (this.isAutofireEnabled(i, j) && !isAnalog) {
+                            this.stopAutofire(i, j);
+                        } else {
+                            this.handler.exec('input.simulate', { player: i, button: j, state: 'released' });
+                        }
+                    } else {
+                        if (this.isAutofireEnabled(i, j) && !isAnalog) {
+                            this.startAutofire(i, j, inputValue);
+                        } else {
+                            this.handler.exec('input.simulate', { player: i, button: j, state: 'pressed' });
+                        }
+                    }
                 } else if (e.type === "axischanged") {
                     if (typeof controlValue === "string" && controlValue.split(":")[0] === e.axis) {
-                        if (special.includes(j)) {
+                        if (isAnalog) {
                             if (j === 16 || j === 17) {
                                 if (e.value > 0) {
                                     this.handler.exec('input.simulate', { player: i, button: 16, state: 'analog', value: 0x7fff * e.value });
@@ -4030,15 +4169,24 @@ class EmulatorJS {
                 this.addEventListener(button, "touchstart touchend touchcancel", (e) => {
                     if (this.virtualGamepadEditMode) return;
                     e.preventDefault();
+                    const isAnalog = this.analogAxes.includes(value);
                     if (e.type === "touchend" || e.type === "touchcancel") {
                         e.target.classList.remove("ejs_virtualGamepad_button_down");
                         window.setTimeout(() => {
-                            this.handler.exec('input.simulate', { player: 0, button: value, state: "released" });
+                            if (this.isAutofireEnabled(0, value) && !isAnalog) {
+                                this.stopAutofire(0, value);
+                            } else {
+                                this.handler.exec('input.simulate', { player: 0, button: value, state: "released" });
+                            }
                         })
                     } else {
                         e.target.classList.add("ejs_virtualGamepad_button_down");
-                        const state = info[i].joystickInput === true ? "analog" : "pressed";
-                        this.handler.exec('input.simulate', { player: 0, button: value, state: state, value: downValue });
+                        if (this.isAutofireEnabled(0, value) && !isAnalog) {
+                            this.startAutofire(0, value, downValue);
+                        } else {
+                            const state = info[i].joystickInput === true ? "analog" : "pressed";
+                            this.handler.exec('input.simulate', { player: 0, button: value, state: state, value: downValue });
+                        }
                     }
                 })
             }
