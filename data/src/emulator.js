@@ -3611,7 +3611,8 @@ class EmulatorJS {
         if (control && typeof control.autoFireInterval === "number") {
             return control.autoFireInterval;
         }
-        return this.defaultAutoFireInterval;
+        const settingValue = this.getSettingValue("autofireInterval");
+        return settingValue ? parseInt(settingValue) : this.defaultAutoFireInterval;
     }
     isAutofireEnabled(playerIndex, buttonIndex) {
         const control = this.controls[playerIndex] && this.controls[playerIndex][buttonIndex];
@@ -4903,6 +4904,8 @@ class EmulatorJS {
             this.gameManager.setAltKeyEnabled(value === "enabled");
         } else if (option === "lockMouse") {
             this.enableMouseLock = (value === "enabled");
+        } else if (option === "autofireInterval") {
+            this.defaultAutoFireInterval = parseInt(value);
         }
     }
     menuOptionChanged(option, value) {
@@ -5571,6 +5574,14 @@ class EmulatorJS {
             "disabled": this.localization("Disabled"),
             "enabled": this.localization("Enabled"),
         }, (this.enableMouseLock === true ? "enabled" : "disabled"), inputOptions, true);
+
+        addToMenu(this.localization("Autofire Interval"), "autofireInterval", {
+            "20": "20ms",
+            "50": "50ms",
+            "100": "100ms",
+            "200": "200ms",
+            "500": "500ms",
+        }, "100", inputOptions, true);
 
         checkForEmptyMenu(inputOptions);
 
